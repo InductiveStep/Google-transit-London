@@ -1,7 +1,7 @@
 ---
 title: "Google Transit data across London boroughs"
 author: "Andi Fugard (almost@gmail.com)"
-date: "06/03/2021"
+date: "07/03/2021"
 output: html_document
 ---
 
@@ -11,10 +11,10 @@ knitr::opts_chunk$set(echo = TRUE)
 
 **Warning: these analyses use data from Google -- data quality unclear...**
 
-
 ```{r message=FALSE}
 library(tidyverse)
 library(magrittr)
+library(lubridate)
 ```
 
 Data grabbed from [over here](https://www.google.com/covid19/mobility/). To quote the [docs](https://www.google.com/covid19/mobility/data_documentation.html?hl=en):
@@ -42,7 +42,11 @@ dat <- read.csv("2020_GB_Region_Mobility_Report.csv")
 Parse the string dates into Date objects: 
 
 ```{r}
-dat %<>% mutate(day = parse_date(date, "%Y-%m-%d"))
+dat %<>% mutate(
+  day = parse_date(date, "%Y-%m-%d"),
+  day_of_week = wday(day, label = TRUE),
+  weekday = ifelse(day_of_week %in% c("Sat", "Sun"), "Weekend", "Weekday")
+)
 ```
 
 Grab borough-level data for Greater London:
@@ -117,7 +121,7 @@ Which areas have more people who still have to travel to their workplace?
 
 ```{r fig.height=8, fig.width=8, dpi = 300}
 tidy_london %>%
-  filter(location == "workplaces") %>%
+  filter(location %in% c("workplaces")) %>%
   filter(day >= as.Date("2021-01-01") &
          day < as.Date("2021-03-01")) %>%
   group_by(sub_region_2) %>%
@@ -129,4 +133,40 @@ tidy_london %>%
   labs(y = NULL, x = "% Change from baseline", title = "Visits to workplaces",
        subtitle = "Mean change from pre-Covid baseline, Jan to Feb 2021")
 ```
+
+
+
+```{r}
+sum_res_weekday <- tidy_london %>%
+  filter(location %in% c("residential")) %>%
+  filter(day >= as.Date("2021-01-01") &
+           day < as.Date("2021-03-01")) %>%
+  group_by(sub_region_2, weekday) %>%
+  summarise(mean_change = mean(percent_change_from_baseline)) %>%
+  na.omit()
+```
+
+
+```{r}
+weekday_order <- sum_res_weekday %>%
+  filter(weekday == "Weekday") %>%
+  arrange(mean_change) %>%
+  pull(sub_region_2)
+```
+
+
+```{r fig.height=8, fig.width=8, dpi = 300}
+sum_res_weekday %>%
+  mutate(sub_region_2 = factor(sub_region_2, levels = weekday_order)) %>%
+  ggplot(aes(y = sub_region_2, x = mean_change, colour = weekday)) +
+  geom_point() +
+  labs(
+    y = NULL,
+    x = "% Change from baseline",
+    title = "Time in places of residence",
+    subtitle = "Mean change from pre-Covid baseline, Jan to Feb 2021",
+    colour = NULL
+  )
+```
+
 
