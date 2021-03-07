@@ -1,0 +1,132 @@
+---
+title: "Google Transit data across London boroughs"
+author: "Andi Fugard (almost@gmail.com)"
+date: "06/03/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+**Warning: these analyses use data from Google -- data quality unclear...**
+
+
+```{r message=FALSE}
+library(tidyverse)
+library(magrittr)
+```
+
+Data grabbed from [over here](https://www.google.com/covid19/mobility/). To quote the [docs](https://www.google.com/covid19/mobility/data_documentation.html?hl=en):
+
+"This dataset is intended to help remediate the impact of COVID-19. It shouldn’t be used for medical diagnostic, prognostic, or treatment purposes. It also isn’t intended to be used for guidance on personal travel plans.
+
+"The data shows how visits to places, such as grocery stores and parks, are changing in each geographic region."
+
+The categories of location are as follows:
+
+| Location | Description |
+| -------- | ----------- |
+| Grocery & pharmacy | Mobility trends for places like grocery markets, food warehouses, farmers markets, specialty food shops, drug stores, and pharmacies. |
+|Parks | Mobility trends for places like local parks, national parks, public beaches, marinas, dog parks, plazas, and public gardens. |
+|Transit stations | Mobility trends for places like public transport hubs such as subway, bus, and train stations. |
+| Retail & recreation | Mobility trends for places like restaurants, cafes, shopping centers, theme parks, museums, libraries, and movie theaters. |
+| Residential | Mobility trends for places of residence. |
+
+Read in the data:
+
+```{r}
+dat <- read.csv("2020_GB_Region_Mobility_Report.csv")
+```
+
+Parse the string dates into Date objects: 
+
+```{r}
+dat %<>% mutate(day = parse_date(date, "%Y-%m-%d"))
+```
+
+Grab borough-level data for Greater London:
+
+```{r}
+london_dat <- dat %>%
+  filter(sub_region_1 == "Greater London") %>%
+  filter(sub_region_2 != "")
+```
+
+
+```{r}
+london_dat %>%
+  group_by(sub_region_2) %>%
+  tally()
+```
+
+There's a bunch of variables giving the percentage change from baseline for each on each day and in each borough:
+
+```{r}
+london_dat %>%
+  select(ends_with("percent_change_from_baseline")) %>%
+  names()
+```
+
+So, for ease of plotting later, let's tidy that a bit...
+
+```{r}
+tidy_london <- london_dat %>%
+  pivot_longer(
+    cols = ends_with("percent_change_from_baseline"),
+    names_to = "location",
+    names_pattern = "(.+)_percent_change_from_baseline",
+    values_to = "percent_change_from_baseline"
+  )
+```
+
+```{r}
+tidy_london %>%
+  select(location, percent_change_from_baseline) %>%
+  slice_sample(n = 10)
+```
+
+
+Now a couple of plots... First setup the basic structure:
+
+```{r}
+plot_base <- tidy_london %>%
+  mutate(location = gsub("_", " ", location)) %>%
+  ggplot(aes(x = day, y = percent_change_from_baseline,
+             color = sub_region_2)) +
+  theme(legend.position = "none") +
+  facet_wrap(vars(location), ncol = 2) +
+  labs(x = "Date", y = "% change from baseline")
+```
+
+First with a messy series of lines joining points:
+
+```{r fig.height=8, fig.width=6, dpi = 300}
+plot_base +
+  geom_line()
+```
+
+Now with a smoother:
+
+```{r fig.height=8, fig.width=6, dpi = 300}
+plot_base +
+  geom_smooth(se = FALSE)
+```
+
+Which areas have more people who still have to travel to their workplace?
+
+```{r fig.height=8, fig.width=8, dpi = 300}
+tidy_london %>%
+  filter(location == "workplaces") %>%
+  filter(day >= as.Date("2021-01-01") &
+         day < as.Date("2021-03-01")) %>%
+  group_by(sub_region_2) %>%
+  summarise(mean_change = mean(percent_change_from_baseline)) %>%
+  na.omit() %>%
+  mutate(sub_region_2 = fct_reorder(sub_region_2, mean_change)) %>%
+  ggplot(aes(y = sub_region_2, x = mean_change)) +
+  geom_point() +
+  labs(y = NULL, x = "% Change from baseline", title = "Visits to workplaces",
+       subtitle = "Mean change from pre-Covid baseline, Jan to Feb 2021")
+```
+
